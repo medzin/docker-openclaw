@@ -1,0 +1,108 @@
+name: Build and Publish OpenClaw
+
+on:
+  schedule:
+    - cron: "23 3 * * *"
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - Dockerfile
+      - docker-entrypoint.sh
+      - scripts/**
+      - .github/workflows/build-and-publish.yml
+
+permissions:
+  contents: read
+
+jobs:
+  check-versions:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Check for new versions
+        id: set-matrix
+        run: |
+          MATRIX_JSON=$(./scripts/determine-versions.sh)
+          echo "Build matrix: $MATRIX_JSON"
+          echo "matrix=$MATRIX_JSON" >> "$GITHUB_OUTPUT"
+
+  build-and-push:
+    needs: check-versions
+    if: ${{ needs.check-versions.outputs.matrix != '[]' }}
+    runs-on: ubuntu-latest
+    strategy:
+      max-parallel: 1
+      matrix:
+        version: ${{ fromJson(needs.check-versions.outputs.matrix) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build for testing
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          build-args: |
+            OPENCLAW_VERSION=${{ matrix.version }}
+          tags: medzin/openclaw:${{ matrix.version }}
+
+      - name: Run permission tests
+        run: |
+          ./scripts/test-permissions.sh medzin/openclaw:${{ matrix.version }} skip-build
+
+      - name: Check if this version is the latest stable
+        id: check_latest
+        run: |
+          if [ "${{ matrix.version }}" = "latest" ]; then
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          LATEST_TAG=$(./scripts/determine-versions.sh --latest-upstream)
+
+          if [ "${{ matrix.version }}" = "$LATEST_TAG" ]; then
+            echo "is_latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "is_latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set Docker tags
+        id: docker_tags
+        run: |
+          {
+            echo "tags<<EOF"
+            echo "medzin/openclaw:${{ matrix.version }}"
+            if [ "${{ steps.check_latest.outputs.is_latest }}" = "true" ]; then
+              echo "medzin/openclaw:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: true
+          build-args: |
+            OPENCLAW_VERSION=${{ matrix.version }}
+          tags: ${{ steps.docker_tags.outputs.tags }}
+          platforms: linux/amd64,linux/arm64
