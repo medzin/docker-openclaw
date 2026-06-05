@@ -25,6 +25,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Check release variant wiring
+        run: |
+          ./scripts/test-release-variants.sh
+
       - name: Check for new versions
         id: set-matrix
         run: |
@@ -40,6 +44,7 @@ jobs:
       max-parallel: 1
       matrix:
         version: ${{ fromJson(needs.check-versions.outputs.matrix) }}
+        variant: [minimal, extras]
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -56,6 +61,15 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Set local image tag
+        id: local_image
+        run: |
+          if [ "${{ matrix.variant }}" = "extras" ]; then
+            echo "tag=medzin/openclaw:${{ matrix.version }}-extras" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=medzin/openclaw:${{ matrix.version }}" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Build for testing
         uses: docker/build-push-action@v7
         with:
@@ -63,11 +77,14 @@ jobs:
           load: true
           build-args: |
             OPENCLAW_VERSION=${{ matrix.version }}
-          tags: medzin/openclaw:${{ matrix.version }}
+            IMAGE_VARIANT=${{ matrix.variant }}
+          tags: ${{ steps.local_image.outputs.tag }}
+          cache-from: type=gha,scope=openclaw-${{ matrix.version }}
+          cache-to: type=gha,scope=openclaw-${{ matrix.version }},mode=max
 
       - name: Run permission tests
         run: |
-          ./scripts/test-permissions.sh medzin/openclaw:${{ matrix.version }} skip-build
+          ./scripts/test-permissions.sh ${{ steps.local_image.outputs.tag }} skip-build
 
       - name: Check if this version is the latest stable
         id: check_latest
@@ -90,9 +107,16 @@ jobs:
         run: |
           {
             echo "tags<<EOF"
-            echo "medzin/openclaw:${{ matrix.version }}"
-            if [ "${{ steps.check_latest.outputs.is_latest }}" = "true" ]; then
-              echo "medzin/openclaw:latest"
+            if [ "${{ matrix.variant }}" = "extras" ]; then
+              echo "medzin/openclaw:${{ matrix.version }}-extras"
+              if [ "${{ steps.check_latest.outputs.is_latest }}" = "true" ]; then
+                echo "medzin/openclaw:extras"
+              fi
+            else
+              echo "medzin/openclaw:${{ matrix.version }}"
+              if [ "${{ steps.check_latest.outputs.is_latest }}" = "true" ]; then
+                echo "medzin/openclaw:latest"
+              fi
             fi
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
@@ -104,5 +128,8 @@ jobs:
           push: true
           build-args: |
             OPENCLAW_VERSION=${{ matrix.version }}
+            IMAGE_VARIANT=${{ matrix.variant }}
           tags: ${{ steps.docker_tags.outputs.tags }}
           platforms: linux/amd64,linux/arm64
+          cache-from: type=gha,scope=openclaw-${{ matrix.version }}
+          cache-to: type=gha,scope=openclaw-${{ matrix.version }},mode=max

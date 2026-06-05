@@ -31,6 +31,16 @@ docker run -d \
   medzin/openclaw:latest
 ```
 
+## Image Channels
+
+- `medzin/openclaw:latest` is the standard Unraid wrapper image.
+- `medzin/openclaw:extras` includes additional tools for agents:
+  `ripgrep`, `openssh-client`, `nmap`, `qrencode`, `imagemagick`, `ffmpeg`,
+  `nftables`, and `debugpy`.
+
+Versioned extras tags are published as `<openclaw-version>-extras`, for
+example `medzin/openclaw:1.2.3-extras`.
+
 OpenClaw refuses to bind its gateway to a container-published address without
 authentication. Set `OPENCLAW_GATEWAY_TOKEN` or `OPENCLAW_GATEWAY_PASSWORD`
 before exposing the WebUI port.

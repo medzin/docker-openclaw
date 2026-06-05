@@ -1,11 +1,26 @@
 ARG OPENCLAW_VERSION=latest
 FROM ghcr.io/openclaw/openclaw:${OPENCLAW_VERSION}
 
+ARG IMAGE_VARIANT=minimal
+
 USER root
 
 RUN apt-get update \
   && apt-get install -y --no-install-recommends gosu ca-certificates passwd \
   && rm -rf /var/lib/apt/lists/*
+
+RUN case "$IMAGE_VARIANT" in \
+    minimal) ;; \
+    extras) \
+      apt-get update \
+      && apt-get install -y --no-install-recommends ripgrep openssh-client nmap qrencode imagemagick ffmpeg nftables python3-debugpy \
+      && rm -rf /var/lib/apt/lists/* \
+      ;; \
+    *) \
+      echo "Unsupported IMAGE_VARIANT: $IMAGE_VARIANT" >&2; \
+      exit 64; \
+      ;; \
+  esac
 
 COPY docker-entrypoint.sh /
 RUN chmod +x /docker-entrypoint.sh
